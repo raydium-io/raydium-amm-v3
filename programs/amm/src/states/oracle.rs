@@ -100,7 +100,7 @@ impl ObservationState {
         Ok(())
     }
 
-    // Writes an oracle observation to the account, returning the next observation_index.
+    /// Writes an oracle observation to the account, returning the next observation_index.
     /// Writable at most once per second. Index represents the most recently written element.
     /// If the index is at the end of the allowable array length (1000 - 1), the next index will turn to 0.
     ///

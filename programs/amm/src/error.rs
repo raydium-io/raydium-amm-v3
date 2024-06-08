@@ -20,9 +20,9 @@ pub enum ErrorCode {
     InvaildTickIndex,
     #[msg("The lower tick must be below the upper tick")]
     TickInvaildOrder,
-    #[msg("The tick must be greater, or equal to the minimum tick(-221818)")]
+    #[msg("The tick must be greater, or equal to the minimum tick(-443636)")]
     TickLowerOverflow,
-    #[msg("The tick must be lesser than, or equal to the maximum tick(221818)")]
+    #[msg("The tick must be lesser than, or equal to the maximum tick(443636)")]
     TickUpperOverflow,
     #[msg("tick % tick_spacing must be zero")]
     TickAndSpacingNotMatch,

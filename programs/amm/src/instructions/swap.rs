@@ -555,6 +555,349 @@ pub fn swap_internal<'b, 'info>(
     Ok((amount_0, amount_1))
 }
 
+/// Attempts to extract the quoting logic
+pub fn swap_on_swap_state(
+    amm_config: &AmmConfig,
+    pool_state: &PoolState,
+    mut state: SwapState,
+    mut tick_array_states: VecDeque<&TickArrayState>,
+    tickarray_bitmap_extension: &Option<TickArrayBitmapExtension>,
+    amount_specified: u64,
+    sqrt_price_limit_x64: u128,
+    zero_for_one: bool,
+    is_base_input: bool,
+) -> Result<(SwapState, u64, u64)> {
+    let mut tick_array_current = tick_array_states
+        .pop_front()
+        .ok_or(ErrorCode::InsufficientTickArrayStates)?;
+    // check tick_array account is owned by the pool
+    // require_keys_eq!(tick_array_current.pool_id, pool_state.key());
+
+    let (mut is_match_pool_current_tick_array, first_vaild_tick_array_start_index) =
+        pool_state.get_first_initialized_tick_array(&tickarray_bitmap_extension, zero_for_one)?;
+    let mut current_vaild_tick_array_start_index = first_vaild_tick_array_start_index;
+
+    // Unecessary validation for quote estimation
+    // let expected_first_tick_array_address = Pubkey::find_program_address(
+    //     &[
+    //         TICK_ARRAY_SEED.as_bytes(),
+    //         pool_state.key().as_ref(),
+    //         &current_vaild_tick_array_start_index.to_be_bytes(),
+    //     ],
+    //     &crate::id(),
+    // )
+    // .0;
+
+    // let mut tick_array_current = tick_array_states.pop_front().unwrap();
+    // for _ in 0..tick_array_states.len() {
+    //     // check tick_array account is owned by the pool
+    //     require_keys_eq!(tick_array_current.pool_id, pool_state.key());
+    //     if tick_array_current.key() == expected_first_tick_array_address {
+    //         break;
+    //     }
+    //     tick_array_current = tick_array_states
+    //         .pop_front()
+    //         .ok_or(ErrorCode::NotEnoughTickArrayAccount)?;
+    // }
+    // // check first tick array account is correct
+    // require_keys_eq!(
+    //     tick_array_current.key(),
+    //     expected_first_tick_array_address,
+    //     ErrorCode::InvalidFirstTickArrayAccount
+    // );
+
+    // continue swapping as long as we haven't used the entire input/output and haven't
+    // reached the price limit
+    while state.amount_specified_remaining != 0 && state.sqrt_price_x64 != sqrt_price_limit_x64 {
+        #[cfg(feature = "enable-log")]
+        msg!(
+            "while begin, is_base_input:{},fee_growth_global_x32:{}, state_sqrt_price_x64:{}, state_tick:{},state_liquidity:{},state.protocol_fee:{}, protocol_fee_rate:{}",
+            is_base_input,
+            state.fee_growth_global_x64,
+            state.sqrt_price_x64,
+            state.tick,
+            state.liquidity,
+            state.protocol_fee,
+            amm_config.protocol_fee_rate
+        );
+        // Save these three pieces of information for PriceChangeEvent
+        // let tick_before = state.tick;
+        // let sqrt_price_x64_before = state.sqrt_price_x64;
+        // let liquidity_before = state.liquidity;
+
+        let mut step = StepComputations::default();
+        step.sqrt_price_start_x64 = state.sqrt_price_x64;
+        let default_tick_state = TickState::default();
+        let mut next_initialized_tick = if let Some(tick_state) = tick_array_current
+            .next_initialized_tick(state.tick, pool_state.tick_spacing, zero_for_one)?
+        {
+            tick_state
+        } else {
+            if !is_match_pool_current_tick_array {
+                is_match_pool_current_tick_array = true;
+                tick_array_current.first_initialized_tick(zero_for_one)?
+            } else {
+                &default_tick_state
+            }
+        };
+        #[cfg(feature = "enable-log")]
+        msg!(
+            "next_initialized_tick, status:{}, tick_index:{}, tick_array_current:{}",
+            next_initialized_tick.is_initialized(),
+            identity(next_initialized_tick.tick),
+            tick_array_current.key().to_string(),
+        );
+        if !next_initialized_tick.is_initialized() {
+            let next_initialized_tickarray_index = pool_state
+                .next_initialized_tick_array_start_index(
+                    &tickarray_bitmap_extension,
+                    current_vaild_tick_array_start_index,
+                    zero_for_one,
+                )?;
+            current_vaild_tick_array_start_index =
+                next_initialized_tickarray_index.ok_or(ErrorCode::LiquidityInsufficient)?;
+
+            tick_array_current = tick_array_states
+                .pop_front()
+                .ok_or(ErrorCode::InsufficientTickArrayStates)?;
+
+            // let expected_next_tick_array_address = Pubkey::find_program_address(
+            //     &[
+            //         TICK_ARRAY_SEED.as_bytes(),
+            //         pool_state.key().as_ref(),
+            //         &next_initialized_tickarray_index.unwrap().to_be_bytes(),
+            //     ],
+            //     &crate::id(),
+            // )
+            // .0;
+
+            // while tick_array_current
+            //     .key()
+            //     .ne(&expected_next_tick_array_address)
+            // {
+            //     tick_array_current = tick_array_states
+            //         .pop_front()
+            //         .ok_or(ErrorCode::NotEnoughTickArrayAccount)?;
+            // }
+
+            let first_initialized_tick = tick_array_current.first_initialized_tick(zero_for_one)?;
+            next_initialized_tick = first_initialized_tick;
+        }
+        step.tick_next = next_initialized_tick.tick;
+        step.initialized = next_initialized_tick.is_initialized();
+
+        if step.tick_next < tick_math::MIN_TICK {
+            step.tick_next = tick_math::MIN_TICK;
+        } else if step.tick_next > tick_math::MAX_TICK {
+            step.tick_next = tick_math::MAX_TICK;
+        }
+        step.sqrt_price_next_x64 = tick_math::get_sqrt_price_at_tick(step.tick_next)?;
+
+        let target_price = if (zero_for_one && step.sqrt_price_next_x64 < sqrt_price_limit_x64)
+            || (!zero_for_one && step.sqrt_price_next_x64 > sqrt_price_limit_x64)
+        {
+            sqrt_price_limit_x64
+        } else {
+            step.sqrt_price_next_x64
+        };
+
+        if zero_for_one {
+            require_gte!(state.tick, step.tick_next);
+            require_gte!(step.sqrt_price_start_x64, step.sqrt_price_next_x64);
+            require_gte!(step.sqrt_price_start_x64, target_price);
+        } else {
+            require_gt!(step.tick_next, state.tick);
+            require_gte!(step.sqrt_price_next_x64, step.sqrt_price_start_x64);
+            require_gte!(target_price, step.sqrt_price_start_x64);
+        }
+        #[cfg(feature = "enable-log")]
+        msg!(
+            "sqrt_price_current_x64:{}, sqrt_price_target:{}, liquidity:{}, amount_remaining:{}",
+            step.sqrt_price_start_x64,
+            target_price,
+            state.liquidity,
+            state.amount_specified_remaining
+        );
+        let swap_step = swap_math::compute_swap_step(
+            step.sqrt_price_start_x64,
+            target_price,
+            state.liquidity,
+            state.amount_specified_remaining,
+            amm_config.trade_fee_rate,
+            is_base_input,
+            zero_for_one,
+        );
+        #[cfg(feature = "enable-log")]
+        msg!("{:#?}", swap_step);
+        if zero_for_one {
+            require_gte!(swap_step.sqrt_price_next_x64, target_price);
+        } else {
+            require_gte!(target_price, swap_step.sqrt_price_next_x64);
+        }
+        state.sqrt_price_x64 = swap_step.sqrt_price_next_x64;
+        step.amount_in = swap_step.amount_in;
+        step.amount_out = swap_step.amount_out;
+        step.fee_amount = swap_step.fee_amount;
+
+        if is_base_input {
+            state.amount_specified_remaining = state
+                .amount_specified_remaining
+                .checked_sub(step.amount_in + step.fee_amount)
+                .ok_or(ErrorCode::InvalidComputation)?;
+            state.amount_calculated = state
+                .amount_calculated
+                .checked_add(step.amount_out)
+                .ok_or(ErrorCode::InvalidComputation)?;
+        } else {
+            state.amount_specified_remaining = state
+                .amount_specified_remaining
+                .checked_sub(step.amount_out)
+                .ok_or(ErrorCode::InvalidComputation)?;
+            state.amount_calculated = state
+                .amount_calculated
+                .checked_add(step.amount_in + step.fee_amount)
+                .ok_or(ErrorCode::InvalidComputation)?;
+        }
+
+        let step_fee_amount = step.fee_amount;
+        // if the protocol fee is on, calculate how much is owed, decrement fee_amount, and increment protocol_fee
+        if amm_config.protocol_fee_rate > 0 {
+            let delta = U128::from(step_fee_amount)
+                .checked_mul(amm_config.protocol_fee_rate.into())
+                .ok_or(ErrorCode::InvalidComputation)?
+                .checked_div(FEE_RATE_DENOMINATOR_VALUE.into())
+                .ok_or(ErrorCode::InvalidComputation)?
+                .as_u64();
+            step.fee_amount = step
+                .fee_amount
+                .checked_sub(delta)
+                .ok_or(ErrorCode::InvalidComputation)?;
+            state.protocol_fee = state
+                .protocol_fee
+                .checked_add(delta)
+                .ok_or(ErrorCode::InvalidComputation)?;
+        }
+        // if the fund fee is on, calculate how much is owed, decrement fee_amount, and increment fund_fee
+        if amm_config.fund_fee_rate > 0 {
+            let delta = U128::from(step_fee_amount)
+                .checked_mul(amm_config.fund_fee_rate.into())
+                .ok_or(ErrorCode::InvalidComputation)?
+                .checked_div(FEE_RATE_DENOMINATOR_VALUE.into())
+                .ok_or(ErrorCode::InvalidComputation)?
+                .as_u64();
+            step.fee_amount = step
+                .fee_amount
+                .checked_sub(delta)
+                .ok_or(ErrorCode::InvalidComputation)?;
+            state.fund_fee = state
+                .fund_fee
+                .checked_add(delta)
+                .ok_or(ErrorCode::InvalidComputation)?;
+        }
+
+        // update global fee tracker
+        if state.liquidity > 0 {
+            let fee_growth_global_x64_delta = U128::from(step.fee_amount)
+                .mul_div_floor(U128::from(fixed_point_64::Q64), U128::from(state.liquidity))
+                .ok_or(ErrorCode::InvalidComputation)?
+                .as_u128();
+
+            state.fee_growth_global_x64 = state
+                .fee_growth_global_x64
+                .checked_add(fee_growth_global_x64_delta)
+                .ok_or(ErrorCode::InvalidComputation)?;
+            state.fee_amount = state
+                .fee_amount
+                .checked_add(step.fee_amount)
+                .ok_or(ErrorCode::InvalidComputation)?;
+            #[cfg(feature = "enable-log")]
+            msg!(
+                "fee_growth_global_x64_delta:{}, state.fee_growth_global_x64:{}, state.liquidity:{}, step.fee_amount:{}, state.fee_amount:{}",
+                fee_growth_global_x64_delta,
+                state.fee_growth_global_x64, state.liquidity, step.fee_amount, state.fee_amount
+            );
+        }
+        // shift tick if we reached the next price
+        if state.sqrt_price_x64 == step.sqrt_price_next_x64 {
+            // if the tick is initialized, run the tick transition
+            if step.initialized {
+                #[cfg(feature = "enable-log")]
+                msg!("loading next tick {}", step.tick_next);
+
+                let mut liquidity_net = next_initialized_tick.liquidity_net;
+                // update tick_state to tick_array account
+                // tick_array_current.update_tick_state(
+                //     next_initialized_tick.tick,
+                //     pool_state.tick_spacing.into(),
+                //     *next_initialized_tick,
+                // )?;
+
+                if zero_for_one {
+                    liquidity_net = liquidity_net.neg();
+                }
+                state.liquidity = liquidity_math::add_delta(state.liquidity, liquidity_net)?;
+            }
+
+            state.tick = if zero_for_one {
+                step.tick_next - 1
+            } else {
+                step.tick_next
+            };
+        } else if state.sqrt_price_x64 != step.sqrt_price_start_x64 {
+            // recompute unless we're on a lower tick boundary (i.e. already transitioned ticks), and haven't moved
+            // if only a small amount of quantity is traded, the input may be consumed by fees, resulting in no price change. If state.sqrt_price_x64, i.e., the latest price in the pool, is used to recalculate the tick, some errors may occur.
+            // for example, if zero_for_one, and the price falls exactly on an initialized tick t after the first trade, then at this point, pool.sqrtPriceX64 = get_sqrt_price_at_tick(t), while pool.tick = t-1. if the input quantity of the
+            // second trade is very small and the pool price does not change after the transaction, if the tick is recalculated, pool.tick will be equal to t, which is incorrect.
+            state.tick = tick_math::get_tick_at_sqrt_price(state.sqrt_price_x64)?;
+        }
+
+        #[cfg(feature = "enable-log")]
+        msg!(
+            "end, is_base_input:{},step_amount_in:{}, step_amount_out:{}, step_fee_amount:{},fee_growth_global_x32:{}, state_sqrt_price_x64:{}, state_tick:{}, state_liquidity:{},state.protocol_fee:{}, protocol_fee_rate:{}, state.fund_fee:{}, fund_fee_rate:{}",
+            is_base_input,
+            step.amount_in,
+            step.amount_out,
+            step.fee_amount,
+            state.fee_growth_global_x64,
+            state.sqrt_price_x64,
+            state.tick,
+            state.liquidity,
+            state.protocol_fee,
+            amm_config.protocol_fee_rate,
+            state.fund_fee,
+            amm_config.fund_fee_rate,
+        );
+        // emit!(PriceChangeEvent {
+        //     pool_state: pool_state.key(),
+        //     tick_before,
+        //     tick_after: state.tick,
+        //     sqrt_price_x64_before,
+        //     sqrt_price_x64_after: state.sqrt_price_x64,
+        //     liquidity_before,
+        //     liquidity_after: state.liquidity,
+        //     zero_for_one,
+        // });
+    }
+
+    let (amount_0, amount_1) = if zero_for_one == is_base_input {
+        (
+            amount_specified
+                .checked_sub(state.amount_specified_remaining)
+                .ok_or(ErrorCode::InvalidComputation)?,
+            state.amount_calculated,
+        )
+    } else {
+        (
+            state.amount_calculated,
+            amount_specified
+                .checked_sub(state.amount_specified_remaining)
+                .ok_or(ErrorCode::InvalidComputation)?,
+        )
+    };
+
+    Ok((state, amount_0, amount_1))
+}
+
 /// Performs a single exact input/output swap
 /// if is_base_input = true, return vaule is the max_amount_out, otherwise is min_amount_in
 pub fn exact_internal<'b, 'c: 'info, 'info>(

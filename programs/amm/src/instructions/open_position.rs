@@ -4,13 +4,13 @@ use crate::libraries::tick_math;
 use crate::states::*;
 use crate::util::*;
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program;
+// use anchor_lang::solana_program;
 use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::metadata::Metadata;
 use anchor_spl::token::{self, Token};
-use anchor_spl::token_2022::{self, spl_token_2022::instruction::AuthorityType};
+// use anchor_spl::token_2022::{self, spl_token_2022::instruction::AuthorityType};
 use anchor_spl::token_interface::{Mint, Token2022, TokenAccount};
-use mpl_token_metadata::{instruction::create_metadata_accounts_v3, state::Creator};
+// use mpl_token_metadata::{instruction::create_metadata_accounts_v3, state::Creator};
 use std::cell::RefMut;
 #[cfg(feature = "enable-log")]
 use std::convert::identity;
@@ -576,18 +576,18 @@ pub fn open_position<'a, 'b, 'c: 'info, 'info>(
             deposit_amount_1_transfer_fee: amount_1_transfer_fee
         });
     }
-    create_nft_with_metadata(
-        payer,
-        pool_state_loader,
-        position_nft_mint,
-        position_nft_account,
-        metadata_account,
-        metadata_program,
-        token_program,
-        system_program,
-        rent,
-        with_matedata,
-    )?;
+    // create_nft_with_metadata(
+    //     payer,
+    //     pool_state_loader,
+    //     position_nft_mint,
+    //     position_nft_account,
+    //     metadata_account,
+    //     metadata_program,
+    //     token_program,
+    //     system_program,
+    //     rent,
+    //     with_matedata,
+    // )?;
 
     Ok(())
 }
@@ -923,84 +923,84 @@ pub fn update_position(
 const METADATA_URI: &str =
     "https://cloudflare-ipfs.com/ipfs/QmbzJafuKY3B4t25eq9zdKZMgXiMeW4jHLzf6KE6ZmHWn1/02.json";
 
-fn create_nft_with_metadata<'info>(
-    payer: &Signer<'info>,
-    pool_state_loader: &AccountLoader<'info, PoolState>,
-    position_nft_mint: &Box<InterfaceAccount<'info, Mint>>,
-    position_nft_account: &Box<InterfaceAccount<'info, TokenAccount>>,
-    metadata_account: &UncheckedAccount<'info>,
-    metadata_program: &Program<'info, Metadata>,
-    token_program: &Program<'info, Token>,
-    system_program: &Program<'info, System>,
-    rent: &Sysvar<'info, Rent>,
-    with_matedata: bool,
-) -> Result<()> {
-    let pool_state = pool_state_loader.load()?;
-    let seeds = pool_state.seeds();
-    // Mint the NFT
-    token::mint_to(
-        CpiContext::new_with_signer(
-            token_program.to_account_info(),
-            token::MintTo {
-                mint: position_nft_mint.to_account_info(),
-                to: position_nft_account.to_account_info(),
-                authority: pool_state_loader.to_account_info(),
-            },
-            &[&seeds],
-        ),
-        1,
-    )?;
-    if with_matedata {
-        let create_metadata_ix = create_metadata_accounts_v3(
-            metadata_program.key(),
-            metadata_account.key(),
-            position_nft_mint.key(),
-            pool_state_loader.key(),
-            payer.key(),
-            pool_state_loader.key(),
-            String::from("Raydium Concentrated Liquidity"),
-            String::from("RCL"),
-            METADATA_URI.to_string(),
-            Some(vec![Creator {
-                address: pool_state_loader.key(),
-                verified: true,
-                share: 100,
-            }]),
-            0,
-            true,
-            false,
-            None,
-            None,
-            None,
-        );
-        solana_program::program::invoke_signed(
-            &create_metadata_ix,
-            &[
-                metadata_account.to_account_info(),
-                position_nft_mint.to_account_info(),
-                payer.to_account_info(),
-                pool_state_loader.to_account_info(),
-                system_program.to_account_info(),
-                rent.to_account_info(),
-            ],
-            &[&seeds],
-        )?;
-    }
-    // Disable minting
-    token_2022::set_authority(
-        CpiContext::new_with_signer(
-            token_program.to_account_info(),
-            token_2022::SetAuthority {
-                current_authority: pool_state_loader.to_account_info(),
-                account_or_mint: position_nft_mint.to_account_info(),
-            },
-            &[&seeds],
-        ),
-        AuthorityType::MintTokens,
-        None,
-    )?;
-    Ok(())
-}
+// fn create_nft_with_metadata<'info>(
+//     payer: &Signer<'info>,
+//     pool_state_loader: &AccountLoader<'info, PoolState>,
+//     position_nft_mint: &Box<InterfaceAccount<'info, Mint>>,
+//     position_nft_account: &Box<InterfaceAccount<'info, TokenAccount>>,
+//     metadata_account: &UncheckedAccount<'info>,
+//     metadata_program: &Program<'info, Metadata>,
+//     token_program: &Program<'info, Token>,
+//     system_program: &Program<'info, System>,
+//     rent: &Sysvar<'info, Rent>,
+//     with_matedata: bool,
+// ) -> Result<()> {
+//     let pool_state = pool_state_loader.load()?;
+//     let seeds = pool_state.seeds();
+//     // Mint the NFT
+//     token::mint_to(
+//         CpiContext::new_with_signer(
+//             token_program.to_account_info(),
+//             token::MintTo {
+//                 mint: position_nft_mint.to_account_info(),
+//                 to: position_nft_account.to_account_info(),
+//                 authority: pool_state_loader.to_account_info(),
+//             },
+//             &[&seeds],
+//         ),
+//         1,
+//     )?;
+//     if with_matedata {
+//         let create_metadata_ix = create_metadata_accounts_v3(
+//             metadata_program.key(),
+//             metadata_account.key(),
+//             position_nft_mint.key(),
+//             pool_state_loader.key(),
+//             payer.key(),
+//             pool_state_loader.key(),
+//             String::from("Raydium Concentrated Liquidity"),
+//             String::from("RCL"),
+//             METADATA_URI.to_string(),
+//             Some(vec![Creator {
+//                 address: pool_state_loader.key(),
+//                 verified: true,
+//                 share: 100,
+//             }]),
+//             0,
+//             true,
+//             false,
+//             None,
+//             None,
+//             None,
+//         );
+//         solana_program::program::invoke_signed(
+//             &create_metadata_ix,
+//             &[
+//                 metadata_account.to_account_info(),
+//                 position_nft_mint.to_account_info(),
+//                 payer.to_account_info(),
+//                 pool_state_loader.to_account_info(),
+//                 system_program.to_account_info(),
+//                 rent.to_account_info(),
+//             ],
+//             &[&seeds],
+//         )?;
+//     }
+//     // Disable minting
+//     token_2022::set_authority(
+//         CpiContext::new_with_signer(
+//             token_program.to_account_info(),
+//             token_2022::SetAuthority {
+//                 current_authority: pool_state_loader.to_account_info(),
+//                 account_or_mint: position_nft_mint.to_account_info(),
+//             },
+//             &[&seeds],
+//         ),
+//         AuthorityType::MintTokens,
+//         None,
+//     )?;
+//     Ok(())
+// }
 
 #[cfg(test)]
 mod modify_position_test {

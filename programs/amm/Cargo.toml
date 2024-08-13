@@ -23,12 +23,11 @@ devnet = []
 paramset = []
 
 [dependencies]
-anchor-lang = { version = "0.29.0", features = ["init-if-needed"] }
-anchor-spl = {version = "0.29.0", features = ["metadata"]}
-solana-program = "<1.17.0"
+anchor-lang = { version = "0.30", features = ["init-if-needed"] }
+anchor-spl = {version = "0.30", features = ["metadata"]}
+solana-program = "1.18"
 spl-memo = "4.0.0"
 uint = "0.9.1"
-mpl-token-metadata = { version = "^1.11.0", features = ["no-entrypoint"] }
 bytemuck = { version = "1.4.0", features = ["derive", "min_const_generics"] }
 arrayref = { version = "0.3.6" }
 solana-security-txt = "1.1.1"

@@ -1,8 +1,7 @@
 use super::open_position::open_position;
-use crate::states::*;
+use crate::{soon_metadata_program, states::*};
 use anchor_lang::prelude::*;
 use anchor_spl::associated_token::AssociatedToken;
-use anchor_spl::metadata::Metadata;
 use anchor_spl::token::{self, Token};
 use anchor_spl::token_interface::{Mint, Token2022, TokenAccount};
 #[derive(Accounts)]
@@ -131,8 +130,9 @@ pub struct OpenPositionV2<'info> {
     pub associated_token_program: Program<'info, AssociatedToken>,
 
     /// Program to create NFT metadata
-    /// CHECK: Metadata program address constraint applied
-    pub metadata_program: Program<'info, Metadata>,
+    /// CHECK: Address checked already
+    #[account(address = soon_metadata_program::id())]
+    pub metadata_program: UncheckedAccount<'info>,
     /// Program to create mint account and mint tokens
     pub token_program_2022: Program<'info, Token2022>,
     /// The mint of token vault 0

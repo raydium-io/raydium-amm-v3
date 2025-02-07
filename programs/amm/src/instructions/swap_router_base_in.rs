@@ -1,12 +1,13 @@
 use crate::error::ErrorCode;
-use crate::states::*;
 use crate::swap_v2::{exact_internal_v2, SwapSingleV2};
+use crate::{states::*, SwapSingleV2Bumps};
 use anchor_lang::prelude::*;
 use anchor_spl::{
     token::Token,
     token_interface::{Mint, Token2022, TokenAccount},
 };
 
+#[event_cpi]
 #[derive(Accounts)]
 pub struct SwapRouterBaseIn<'info> {
     /// The user performing the swap
@@ -78,27 +79,35 @@ pub fn swap_router_base_in<'a, 'b, 'c: 'info, 'info>(
 
         // solana_program::log::sol_log_compute_units();
         accounts = remaining_accounts.as_slice();
-        amount_in_internal = exact_internal_v2(
-            &mut SwapSingleV2 {
-                payer: ctx.accounts.payer.clone(),
-                amm_config,
-                input_token_account: input_token_account.clone(),
-                pool_state: pool_state_loader,
-                output_token_account: output_token_account.clone(),
-                input_vault: input_vault.clone(),
-                output_vault: output_vault.clone(),
-                input_vault_mint: input_token_mint.clone(),
-                output_vault_mint: output_token_mint.clone(),
-                observation_state,
-                token_program: ctx.accounts.token_program.clone(),
-                token_program_2022: ctx.accounts.token_program_2022.clone(),
-                memo_program: ctx.accounts.memo_program.clone(),
-            },
+
+        let swap_accounts = &mut SwapSingleV2 {
+            payer: ctx.accounts.payer.clone(),
+            amm_config,
+            input_token_account: input_token_account.clone(),
+            pool_state: pool_state_loader,
+            output_token_account: output_token_account.clone(),
+            input_vault: input_vault.clone(),
+            output_vault: output_vault.clone(),
+            input_vault_mint: input_token_mint.clone(),
+            output_vault_mint: output_token_mint.clone(),
+            observation_state,
+            token_program: ctx.accounts.token_program.clone(),
+            token_program_2022: ctx.accounts.token_program_2022.clone(),
+            memo_program: ctx.accounts.memo_program.clone(),
+            event_authority: ctx.accounts.event_authority.clone(),
+            program: ctx.accounts.program.clone(),
+        };
+
+        let swap_context = Context::new(
+            &ctx.program_id,
+            swap_accounts,
             accounts,
-            amount_in_internal,
-            0,
-            true,
-        )?;
+            SwapSingleV2Bumps {
+                event_authority: ctx.bumps.event_authority,
+            },
+        );
+
+        amount_in_internal = exact_internal_v2(swap_context, amount_in_internal, 0, true)?;
         // output token is the new swap input token
         input_token_account = output_token_account;
         input_token_mint = output_token_mint;

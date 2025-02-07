@@ -12,6 +12,8 @@ use anchor_spl::token_interface::{Mint, Token2022, TokenAccount};
 
 /// Memo msg for swap
 pub const SWAP_MEMO_MSG: &'static [u8] = b"raydium_swap";
+
+#[event_cpi]
 #[derive(Accounts)]
 pub struct SwapSingleV2<'info> {
     /// The user performing the swap
@@ -78,8 +80,7 @@ pub struct SwapSingleV2<'info> {
 /// Performs a single exact input/output swap
 /// if is_base_input = true, return vaule is the max_amount_out, otherwise is min_amount_in
 pub fn exact_internal_v2<'c: 'info, 'info>(
-    ctx: &mut SwapSingleV2<'info>,
-    remaining_accounts: &'c [AccountInfo<'info>],
+    ctx: Context<'_, '_, 'c, 'info, SwapSingleV2>,
     amount_specified: u64,
     sqrt_price_limit_x64: u128,
     is_base_input: bool,
@@ -93,35 +94,38 @@ pub fn exact_internal_v2<'c: 'info, 'info>(
     let zero_for_one;
     let swap_price_before;
 
-    let input_balance_before = ctx.input_token_account.amount;
-    let output_balance_before = ctx.output_token_account.amount;
+    let input_balance_before = ctx.accounts.input_token_account.amount;
+    let output_balance_before = ctx.accounts.output_token_account.amount;
 
     // calculate specified amount because the amount includes thransfer_fee as input and without thransfer_fee as output
     let amount_calculate_specified = if is_base_input {
         let transfer_fee =
-            util::get_transfer_fee(ctx.input_vault_mint.clone(), amount_specified).unwrap();
+            util::get_transfer_fee(ctx.accounts.input_vault_mint.clone(), amount_specified)
+                .unwrap();
         amount_specified - transfer_fee
     } else {
-        let transfer_fee =
-            util::get_transfer_inverse_fee(ctx.output_vault_mint.clone(), amount_specified)
-                .unwrap();
+        let transfer_fee = util::get_transfer_inverse_fee(
+            ctx.accounts.output_vault_mint.clone(),
+            amount_specified,
+        )
+        .unwrap();
         amount_specified + transfer_fee
     };
 
     {
-        swap_price_before = ctx.pool_state.load()?.sqrt_price_x64;
-        let pool_state = &mut ctx.pool_state.load_mut()?;
-        zero_for_one = ctx.input_vault.mint == pool_state.token_mint_0;
+        swap_price_before = ctx.accounts.pool_state.load()?.sqrt_price_x64;
+        let pool_state = &mut ctx.accounts.pool_state.load_mut()?;
+        zero_for_one = ctx.accounts.input_vault.mint == pool_state.token_mint_0;
 
         require_gt!(block_timestamp, pool_state.open_time);
 
         require!(
             if zero_for_one {
-                ctx.input_vault.key() == pool_state.token_vault_0
-                    && ctx.output_vault.key() == pool_state.token_vault_1
+                ctx.accounts.input_vault.key() == pool_state.token_vault_0
+                    && ctx.accounts.output_vault.key() == pool_state.token_vault_1
             } else {
-                ctx.input_vault.key() == pool_state.token_vault_1
-                    && ctx.output_vault.key() == pool_state.token_vault_0
+                ctx.accounts.input_vault.key() == pool_state.token_vault_1
+                    && ctx.accounts.output_vault.key() == pool_state.token_vault_0
             },
             ErrorCode::InvalidInputPoolVault
         );
@@ -130,7 +134,7 @@ pub fn exact_internal_v2<'c: 'info, 'info>(
         let tick_array_states = &mut VecDeque::new();
 
         let tick_array_bitmap_extension_key = TickArrayBitmapExtension::key(pool_state.key());
-        for account_info in remaining_accounts.into_iter() {
+        for account_info in ctx.remaining_accounts.into_iter() {
             if account_info.key().eq(&tick_array_bitmap_extension_key) {
                 tickarray_bitmap_extension = Some(
                     *(AccountLoader::<TickArrayBitmapExtension>::try_from(account_info)?
@@ -143,10 +147,10 @@ pub fn exact_internal_v2<'c: 'info, 'info>(
         }
 
         (amount_0, amount_1) = swap_internal(
-            &ctx.amm_config,
+            &ctx.accounts.amm_config,
             pool_state,
             tick_array_states,
-            &mut ctx.observation_state.load_mut()?,
+            &mut ctx.accounts.observation_state.load_mut()?,
             &tickarray_bitmap_extension,
             amount_calculate_specified,
             if sqrt_price_limit_x64 == 0 {
@@ -178,21 +182,21 @@ pub fn exact_internal_v2<'c: 'info, 'info>(
     let (token_account_0, token_account_1, vault_0, vault_1, vault_0_mint, vault_1_mint) =
         if zero_for_one {
             (
-                ctx.input_token_account.clone(),
-                ctx.output_token_account.clone(),
-                ctx.input_vault.clone(),
-                ctx.output_vault.clone(),
-                ctx.input_vault_mint.clone(),
-                ctx.output_vault_mint.clone(),
+                ctx.accounts.input_token_account.clone(),
+                ctx.accounts.output_token_account.clone(),
+                ctx.accounts.input_vault.clone(),
+                ctx.accounts.output_vault.clone(),
+                ctx.accounts.input_vault_mint.clone(),
+                ctx.accounts.output_vault_mint.clone(),
             )
         } else {
             (
-                ctx.output_token_account.clone(),
-                ctx.input_token_account.clone(),
-                ctx.output_vault.clone(),
-                ctx.input_vault.clone(),
-                ctx.output_vault_mint.clone(),
-                ctx.input_vault_mint.clone(),
+                ctx.accounts.output_token_account.clone(),
+                ctx.accounts.input_token_account.clone(),
+                ctx.accounts.output_vault.clone(),
+                ctx.accounts.input_vault.clone(),
+                ctx.accounts.output_vault_mint.clone(),
+                ctx.accounts.input_vault_mint.clone(),
             )
         };
 
@@ -222,26 +226,26 @@ pub fn exact_internal_v2<'c: 'info, 'info>(
         );
         //  x -> y, deposit x token from user to pool vault.
         transfer_from_user_to_pool_vault(
-            &ctx.payer,
+            &ctx.accounts.payer,
             &token_account_0.to_account_info(),
             &vault_0.to_account_info(),
             Some(vault_0_mint),
-            &ctx.token_program,
-            Some(ctx.token_program_2022.to_account_info()),
+            &ctx.accounts.token_program,
+            Some(ctx.accounts.token_program_2022.to_account_info()),
             transfer_amount_0,
         )?;
         if vault_1.amount <= transfer_amount_1 {
             // freeze pool, disable all instructions
-            ctx.pool_state.load_mut()?.set_status(255);
+            ctx.accounts.pool_state.load_mut()?.set_status(255);
         }
         // x -> y，transfer y token from pool vault to user.
         transfer_from_pool_vault_to_user(
-            &ctx.pool_state,
+            &ctx.accounts.pool_state,
             &vault_1.to_account_info(),
             &token_account_1.to_account_info(),
             Some(vault_1_mint),
-            &ctx.token_program,
-            Some(ctx.token_program_2022.to_account_info()),
+            &ctx.accounts.token_program,
+            Some(ctx.accounts.token_program_2022.to_account_info()),
             transfer_amount_1,
         )?;
     } else {
@@ -260,35 +264,35 @@ pub fn exact_internal_v2<'c: 'info, 'info>(
             transfer_fee_1
         );
         transfer_from_user_to_pool_vault(
-            &ctx.payer,
+            &ctx.accounts.payer,
             &token_account_1.to_account_info(),
             &vault_1.to_account_info(),
             Some(vault_1_mint),
-            &ctx.token_program,
-            Some(ctx.token_program_2022.to_account_info()),
+            &ctx.accounts.token_program,
+            Some(ctx.accounts.token_program_2022.to_account_info()),
             transfer_amount_1,
         )?;
         if vault_0.amount <= transfer_amount_0 {
             // freeze pool, disable all instructions
-            ctx.pool_state.load_mut()?.set_status(255);
+            ctx.accounts.pool_state.load_mut()?.set_status(255);
         }
         transfer_from_pool_vault_to_user(
-            &ctx.pool_state,
+            &ctx.accounts.pool_state,
             &vault_0.to_account_info(),
             &token_account_0.to_account_info(),
             Some(vault_0_mint),
-            &ctx.token_program,
-            Some(ctx.token_program_2022.to_account_info()),
+            &ctx.accounts.token_program,
+            Some(ctx.accounts.token_program_2022.to_account_info()),
             transfer_amount_0,
         )?;
     }
-    ctx.output_token_account.reload()?;
-    ctx.input_token_account.reload()?;
+    ctx.accounts.output_token_account.reload()?;
+    ctx.accounts.input_token_account.reload()?;
 
-    let pool_state = ctx.pool_state.load()?;
-    emit!(SwapEvent {
+    let pool_state = ctx.accounts.pool_state.load()?;
+    emit_cpi!(SwapEvent {
         pool_state: pool_state.key(),
-        sender: ctx.payer.key(),
+        sender: ctx.accounts.payer.key(),
         token_account_0: token_account_0.key(),
         token_account_1: token_account_1.key(),
         amount_0: amount_0_without_fee,
@@ -324,31 +328,26 @@ pub fn exact_internal_v2<'c: 'info, 'info>(
 
     if is_base_input {
         Ok(ctx
+            .accounts
             .output_token_account
             .amount
             .checked_sub(output_balance_before)
             .unwrap())
     } else {
         Ok(input_balance_before
-            .checked_sub(ctx.input_token_account.amount)
+            .checked_sub(ctx.accounts.input_token_account.amount)
             .unwrap())
     }
 }
 
-pub fn swap_v2<'a, 'b, 'c: 'info, 'info>(
-    ctx: Context<'a, 'b, 'c, 'info, SwapSingleV2<'info>>,
+pub fn swap_v2<'c: 'info, 'info>(
+    ctx: Context<'_, '_, 'c, 'info, SwapSingleV2<'info>>,
     amount: u64,
     other_amount_threshold: u64,
     sqrt_price_limit_x64: u128,
     is_base_input: bool,
 ) -> Result<()> {
-    let amount_result = exact_internal_v2(
-        ctx.accounts,
-        ctx.remaining_accounts,
-        amount,
-        sqrt_price_limit_x64,
-        is_base_input,
-    )?;
+    let amount_result = exact_internal_v2(ctx, amount, sqrt_price_limit_x64, is_base_input)?;
     if is_base_input {
         require_gte!(
             amount_result,

@@ -20,17 +20,25 @@ solana_security_txt::security_txt! {
     auditors: "https://github.com/raydium-io/raydium-docs/blob/master/audit/OtterSec%20Q3%202022/Raydium%20concentrated%20liquidity%20(CLMM)%20program.pdf"
 }
 
-#[cfg(feature = "devnet")]
-declare_id!("devi51mZmdwUJGU9hjN27vEz64Gps7uUefqxg27EAtH");
-#[cfg(not(feature = "devnet"))]
-declare_id!("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK");
+#[cfg(feature = "testnet")]
+declare_id!("8ZyF28dyVvevYtdDUSRQGgbHtMV8cYZw53oY4c4ZvkgJ");
+#[cfg(not(feature = "testnet"))]
+declare_id!("8ZyF28dyVvevYtdDUSRQGgbHtMV8cYZw53oY4c4ZvkgJ");
 
 pub mod admin {
     use anchor_lang::prelude::declare_id;
-    #[cfg(feature = "devnet")]
-    declare_id!("adMCyoCgfkg7bQiJ9aBJ59H3BXLY3r5LNLfPpQfMzBe");
-    #[cfg(not(feature = "devnet"))]
-    declare_id!("GThUX1Atko4tqhN2NaiTazWSeFWMuiUvfFnyJyUghFMJ");
+    #[cfg(feature = "testnet")]
+    declare_id!("46fs388TMKGQbY5ycGpoq3jsyxe7iejbSNVs1GpLcsM5");
+    #[cfg(not(feature = "testnet"))]
+    declare_id!("46fs388TMKGQbY5ycGpoq3jsyxe7iejbSNVs1GpLcsM5");
+}
+
+pub mod soon_metadata_program {
+    use anchor_lang::prelude::declare_id;
+    #[cfg(feature = "testnet")]
+    declare_id!("6C4GR9AtMGF25sjXKtdB7A6NVQUudEQWw97kG61pGuA1");
+    #[cfg(not(feature = "testnet"))]
+    declare_id!("6C4GR9AtMGF25sjXKtdB7A6NVQUudEQWw97kG61pGuA1");
 }
 
 #[program]

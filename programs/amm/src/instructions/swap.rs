@@ -12,6 +12,7 @@ use std::collections::VecDeque;
 use std::convert::identity;
 use std::ops::{Deref, Neg};
 
+#[event_cpi]
 #[derive(Accounts)]
 pub struct SwapSingle<'info> {
     /// The user performing the swap
@@ -550,8 +551,8 @@ pub fn swap_internal<'b, 'info>(
 /// Performs a single exact input/output swap
 /// if is_base_input = true, return vaule is the max_amount_out, otherwise is min_amount_in
 pub fn exact_internal<'b, 'c: 'info, 'info>(
-    ctx: &mut SwapAccounts<'b, 'info>,
-    remaining_accounts: &'c [AccountInfo<'info>],
+    // ctx: &mut SwapAccounts<'b, 'info>,
+    ctx: Context<'_, 'b, 'c, 'info, SwapSingle>,
     amount_specified: u64,
     sqrt_price_limit_x64: u128,
     is_base_input: bool,
@@ -563,33 +564,33 @@ pub fn exact_internal<'b, 'c: 'info, 'info>(
     let zero_for_one;
     let swap_price_before;
 
-    let input_balance_before = ctx.input_vault.amount;
-    let output_balance_before = ctx.output_vault.amount;
+    let input_balance_before = ctx.accounts.input_vault.amount;
+    let output_balance_before = ctx.accounts.output_vault.amount;
 
     {
-        swap_price_before = ctx.pool_state.load()?.sqrt_price_x64;
-        let pool_state = &mut ctx.pool_state.load_mut()?;
-        zero_for_one = ctx.input_vault.mint == pool_state.token_mint_0;
+        swap_price_before = ctx.accounts.pool_state.load()?.sqrt_price_x64;
+        let pool_state = &mut ctx.accounts.pool_state.load_mut()?;
+        zero_for_one = ctx.accounts.input_vault.mint == pool_state.token_mint_0;
 
         require_gt!(block_timestamp, pool_state.open_time);
 
         require!(
             if zero_for_one {
-                ctx.input_vault.key() == pool_state.token_vault_0
-                    && ctx.output_vault.key() == pool_state.token_vault_1
+                ctx.accounts.input_vault.key() == pool_state.token_vault_0
+                    && ctx.accounts.output_vault.key() == pool_state.token_vault_1
             } else {
-                ctx.input_vault.key() == pool_state.token_vault_1
-                    && ctx.output_vault.key() == pool_state.token_vault_0
+                ctx.accounts.input_vault.key() == pool_state.token_vault_1
+                    && ctx.accounts.output_vault.key() == pool_state.token_vault_0
             },
             ErrorCode::InvalidInputPoolVault
         );
 
         let mut tickarray_bitmap_extension = None;
         let tick_array_states = &mut VecDeque::new();
-        tick_array_states.push_back(ctx.tick_array_state.load_mut()?);
+        tick_array_states.push_back(ctx.accounts.tick_array.load_mut()?);
 
         let tick_array_bitmap_extension_key = TickArrayBitmapExtension::key(pool_state.key());
-        for account_info in remaining_accounts.into_iter() {
+        for account_info in ctx.remaining_accounts.into_iter() {
             if account_info.key().eq(&tick_array_bitmap_extension_key) {
                 tickarray_bitmap_extension = Some(
                     *(AccountLoader::<TickArrayBitmapExtension>::try_from(account_info)?
@@ -602,10 +603,10 @@ pub fn exact_internal<'b, 'c: 'info, 'info>(
         }
 
         (amount_0, amount_1) = swap_internal(
-            &ctx.amm_config,
+            &ctx.accounts.amm_config,
             pool_state,
             tick_array_states,
-            &mut ctx.observation_state.load_mut()?,
+            &mut ctx.accounts.observation_state.load_mut()?,
             &tickarray_bitmap_extension,
             amount_specified,
             if sqrt_price_limit_x64 == 0 {
@@ -636,76 +637,77 @@ pub fn exact_internal<'b, 'c: 'info, 'info>(
     }
     let (token_account_0, token_account_1, vault_0, vault_1) = if zero_for_one {
         (
-            ctx.input_token_account.clone(),
-            ctx.output_token_account.clone(),
-            ctx.input_vault.clone(),
-            ctx.output_vault.clone(),
+            ctx.accounts.input_token_account.clone(),
+            ctx.accounts.output_token_account.clone(),
+            ctx.accounts.input_vault.clone(),
+            ctx.accounts.output_vault.clone(),
         )
     } else {
         (
-            ctx.output_token_account.clone(),
-            ctx.input_token_account.clone(),
-            ctx.output_vault.clone(),
-            ctx.input_vault.clone(),
+            ctx.accounts.output_token_account.clone(),
+            ctx.accounts.input_token_account.clone(),
+            ctx.accounts.output_vault.clone(),
+            ctx.accounts.input_vault.clone(),
         )
     };
 
     if zero_for_one {
         //  x -> y, deposit x token from user to pool vault.
         transfer_from_user_to_pool_vault(
-            &ctx.signer,
+            &ctx.accounts.payer,
             &token_account_0.to_account_info(),
             &vault_0.to_account_info(),
             None,
-            &ctx.token_program,
+            &ctx.accounts.token_program,
             None,
             amount_0,
         )?;
         if vault_1.amount <= amount_1 {
             // freeze pool, disable all instructions
-            ctx.pool_state.load_mut()?.set_status(255);
+            ctx.accounts.pool_state.load_mut()?.set_status(255);
         }
         // x -> y，transfer y token from pool vault to user.
         transfer_from_pool_vault_to_user(
-            &ctx.pool_state,
+            &ctx.accounts.pool_state,
             &vault_1.to_account_info(),
             &token_account_1.to_account_info(),
             None,
-            &ctx.token_program,
+            &ctx.accounts.token_program,
             None,
             amount_1,
         )?;
     } else {
         transfer_from_user_to_pool_vault(
-            &ctx.signer,
+            &ctx.accounts.payer,
             &token_account_1.to_account_info(),
             &vault_1.to_account_info(),
             None,
-            &ctx.token_program,
+            &ctx.accounts.token_program,
             None,
             amount_1,
         )?;
         if vault_0.amount <= amount_0 {
             // freeze pool, disable all instructions
-            ctx.pool_state.load_mut()?.set_status(255);
+            ctx.accounts.pool_state.load_mut()?.set_status(255);
         }
         transfer_from_pool_vault_to_user(
-            &ctx.pool_state,
+            &ctx.accounts.pool_state,
             &vault_0.to_account_info(),
             &token_account_0.to_account_info(),
             None,
-            &ctx.token_program,
+            &ctx.accounts.token_program,
             None,
             amount_0,
         )?;
     }
-    ctx.output_vault.reload()?;
-    ctx.input_vault.reload()?;
+    ctx.accounts.output_vault.reload()?;
+    ctx.accounts.input_vault.reload()?;
 
-    let pool_state = ctx.pool_state.load()?;
-    emit!(SwapEvent {
+    let pool_state = ctx.accounts.pool_state.load()?;
+
+    emit_cpi!(SwapEvent {
         pool_state: pool_state.key(),
-        sender: ctx.signer.key(),
+        sender: ctx.accounts.payer.key(),
         token_account_0: token_account_0.key(),
         token_account_1: token_account_1.key(),
         amount_0,
@@ -717,6 +719,7 @@ pub fn exact_internal<'b, 'c: 'info, 'info>(
         liquidity: pool_state.liquidity,
         tick: pool_state.tick_current
     });
+
     if zero_for_one {
         require_gt!(swap_price_before, pool_state.sqrt_price_x64);
     } else {
@@ -741,10 +744,11 @@ pub fn exact_internal<'b, 'c: 'info, 'info>(
 
     if is_base_input {
         Ok(output_balance_before
-            .checked_sub(ctx.output_vault.amount)
+            .checked_sub(ctx.accounts.output_vault.amount)
             .unwrap())
     } else {
         Ok(ctx
+            .accounts
             .input_vault
             .amount
             .checked_sub(input_balance_before)
@@ -759,24 +763,7 @@ pub fn swap<'a, 'b, 'c: 'info, 'info>(
     sqrt_price_limit_x64: u128,
     is_base_input: bool,
 ) -> Result<()> {
-    let amount = exact_internal(
-        &mut SwapAccounts {
-            signer: ctx.accounts.payer.clone(),
-            amm_config: &ctx.accounts.amm_config,
-            input_token_account: ctx.accounts.input_token_account.clone(),
-            output_token_account: ctx.accounts.output_token_account.clone(),
-            input_vault: ctx.accounts.input_vault.clone(),
-            output_vault: ctx.accounts.output_vault.clone(),
-            token_program: ctx.accounts.token_program.clone(),
-            pool_state: &mut ctx.accounts.pool_state,
-            tick_array_state: &mut ctx.accounts.tick_array,
-            observation_state: &mut ctx.accounts.observation_state,
-        },
-        ctx.remaining_accounts,
-        amount,
-        sqrt_price_limit_x64,
-        is_base_input,
-    )?;
+    let amount = exact_internal(ctx, amount, sqrt_price_limit_x64, is_base_input)?;
     if is_base_input {
         require!(
             amount >= other_amount_threshold,

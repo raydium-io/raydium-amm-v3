@@ -2,6 +2,7 @@ use anchor_client::{Client, Cluster};
 use anchor_lang::prelude::AccountMeta;
 use anyhow::Result;
 use mpl_token_metadata::state::PREFIX as MPL_PREFIX;
+use raydium_amm_v3::soon_metadata_program;
 use solana_sdk::{
     instruction::Instruction, pubkey::Pubkey, signature::Signer, system_program, sysvar,
 };
@@ -224,10 +225,10 @@ pub fn open_position_instr(
     let (metadata_account_key, _bump) = Pubkey::find_program_address(
         &[
             MPL_PREFIX.as_bytes(),
-            mpl_token_metadata::id().to_bytes().as_ref(),
+            soon_metadata_program::id().to_bytes().as_ref(),
             nft_mint_key.to_bytes().as_ref(),
         ],
-        &mpl_token_metadata::id(),
+        &soon_metadata_program::id(),
     );
     let (protocol_position_key, __bump) = Pubkey::find_program_address(
         &[
@@ -279,7 +280,7 @@ pub fn open_position_instr(
             system_program: system_program::id(),
             token_program: spl_token::id(),
             associated_token_program: spl_associated_token_account::id(),
-            metadata_program: mpl_token_metadata::id(),
+            metadata_program: soon_metadata_program::id(),
             token_program_2022: spl_token_2022::id(),
             vault_0_mint: token_mint_0,
             vault_1_mint: token_mint_1,
@@ -610,6 +611,7 @@ pub fn swap_instr(
     user_input_token: Pubkey,
     user_out_put_token: Pubkey,
     tick_array: Pubkey,
+    event_authority: Pubkey,
     remaining_accounts: Vec<AccountMeta>,
     amount: u64,
     other_amount_threshold: u64,
@@ -634,6 +636,8 @@ pub fn swap_instr(
             tick_array,
             observation_state,
             token_program: spl_token::id(),
+            event_authority,
+            program: program.id(),
         })
         .accounts(remaining_accounts)
         .args(raydium_instruction::Swap {
@@ -657,6 +661,7 @@ pub fn swap_v2_instr(
     user_out_put_token: Pubkey,
     input_vault_mint: Pubkey,
     output_vault_mint: Pubkey,
+    event_authority: Pubkey,
     remaining_accounts: Vec<AccountMeta>,
     amount: u64,
     other_amount_threshold: u64,
@@ -684,6 +689,8 @@ pub fn swap_v2_instr(
             memo_program: spl_memo::id(),
             input_vault_mint,
             output_vault_mint,
+            event_authority,
+            program: program.id(),
         })
         .accounts(remaining_accounts)
         .args(raydium_instruction::SwapV2 {

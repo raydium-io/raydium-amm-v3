@@ -1,13 +1,13 @@
 use crate::error::ErrorCode;
 use crate::libraries::liquidity_math;
 use crate::libraries::tick_math;
+use crate::soon_metadata_program;
 use crate::states::*;
 use crate::util::*;
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program;
 use anchor_lang::system_program::{transfer, Transfer};
 use anchor_spl::associated_token::AssociatedToken;
-use anchor_spl::metadata::Metadata;
 use anchor_spl::token::{Mint, Token, TokenAccount};
 use anchor_spl::token_2022::spl_token_2022::extension::{
     BaseStateWithExtensions, StateWithExtensions,
@@ -152,8 +152,9 @@ pub struct OpenPosition<'info> {
     pub associated_token_program: Program<'info, AssociatedToken>,
 
     /// Program to create NFT metadata
-    /// CHECK: Metadata program address constraint applied
-    pub metadata_program: Program<'info, Metadata>,
+    /// CHECK: Address checked already
+    #[account(address = soon_metadata_program::id())]
+    pub metadata_program: UncheckedAccount<'info>,
     // remaining account
     // #[account(
     //     seeds = [
@@ -235,7 +236,7 @@ pub fn open_position<'a, 'b, 'c: 'info, 'info>(
     system_program: &'b Program<'info, System>,
     token_program: &'b Program<'info, Token>,
     _associated_token_program: &'b Program<'info, AssociatedToken>,
-    metadata_program: Option<&'b Program<'info, Metadata>>,
+    metadata_program: Option<&'b UncheckedAccount<'info>>,
     token_program_2022: Option<&'b Program<'info, Token2022>>,
     vault_0_mint: Option<Box<InterfaceAccount<'info, token_interface::Mint>>>,
     vault_1_mint: Option<Box<InterfaceAccount<'info, token_interface::Mint>>>,
@@ -733,7 +734,7 @@ fn mint_nft_and_remove_mint_authority<'info>(
     position_nft_mint: &AccountInfo<'info>,
     position_nft_account: &AccountInfo<'info>,
     metadata_account: Option<&UncheckedAccount<'info>>,
-    metadata_program: Option<&Program<'info, Metadata>>,
+    metadata_program: Option<&UncheckedAccount<'info>>,
     token_program: &Program<'info, Token>,
     token_program_2022: Option<&Program<'info, Token2022>>,
     system_program: &Program<'info, System>,
@@ -827,7 +828,7 @@ fn initialize_metadata_account<'info>(
     authority: &AccountInfo<'info>,
     position_nft_mint: &AccountInfo<'info>,
     metadata_account: &UncheckedAccount<'info>,
-    metadata_program: &Program<'info, Metadata>,
+    metadata_program: &UncheckedAccount<'info>,
     system_program: &Program<'info, System>,
     rent: &Sysvar<'info, Rent>,
     name: String,
@@ -898,7 +899,7 @@ pub fn initialize_token_metadata_extension<'info>(
         .try_get_new_account_len::<spl_token_metadata_interface::state::TokenMetadata>(&metadata)?;
     let new_rent_exempt_lamports = Rent::get()?.minimum_balance(new_account_len);
     let additional_lamports = new_rent_exempt_lamports.saturating_sub(position_nft_mint.lamports());
-    // CPI call will borrow the account data
+
     drop(mint_data);
 
     let cpi_context = CpiContext::new(

@@ -14,7 +14,7 @@ pub struct OperationState {
     pub bump: u8,
     /// Address of the operation owner
     pub operation_owners: [Pubkey; OPERATION_SIZE_USIZE],
-    /// The mint address of whitelist to emmit reward
+    /// The mint address of whitelist to emit reward
     pub whitelist_mints: [Pubkey; WHITE_MINT_SIZE_USIZE],
 }
 
